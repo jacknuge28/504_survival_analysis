@@ -1,0 +1,157 @@
+---
+title: "STATS 504 R5 BHHT"
+author: "Enora Cattanach, Rachael Gu, Jack Nugent, and Garrett Pinkston"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: readable
+---
+
+```{r setup, include=FALSE}
+try(setwd("./FS25/STATS 504/Report Work/Report #5"), silent = TRUE)
+
+install.packages("muhaz")
+library(muhaz)
+library(tidyverse)
+library(lubridate)
+library(survival)
+library(dplyr)
+library(knitr)
+library(ggplot2)
+```
+
+## Data Cleaning
+```{r}
+bhht <- read.csv("bhht_small.csv.gz")
+# bhht <- read.csv("../cross-verified-database.csv.gz")
+
+bhht %>% colnames %>% sort
+```
+
+### Filter to past 100 years
+```{r}
+# Clean and filter BHHT data
+bhht_clean <- bhht %>%
+
+  # Keep only individuals with known birth year and
+  # restrict to individuals born or dying within past 100 years
+  filter(!is.na(birth)) %>%
+  filter(birth >= 1925 | death >= 1925) %>%
+  
+  mutate(
+    # If no death year, assume alive (censored)
+    death = if_else(is.na(death), year(Sys.Date()), death),
+    
+    # Survival time in years
+    survival_time = death - birth,
+    
+    # Define censoring: (1 = died, 0 = still alive)
+    event = if_else(!is.na(death) & death < year(Sys.Date()), 1, 0),
+    
+    # Clean factor variables
+    gender = factor(gender),
+    un_region = factor(un_region),
+    level1_main_occ = factor(level1_main_occ)
+  ) %>%
+  
+  # Keep reasonable lifespans only, under 110 years?
+  filter(survival_time > 0 & survival_time < 110)
+```
+
+## EDA
+```{r}
+summary(bhht_clean$survival_time)
+table(bhht_clean$gender)
+table(bhht_clean$un_region)
+table(bhht_clean$level1_main_occ)
+```
+
+```{r}
+bhht_clean %>%
+ggplot(aes(x = survival_time, fill = gender)) +
+geom_histogram(bins = 40, position = "identity", alpha = 0.6) +
+labs(title = "Distribution of Lifespans by Gender",
+x = "Years Lived", y = "Count") +
+theme_minimal()
+```
+
+```{r}
+t <- bhht_clean %>% filter(gender == "Other") %>% head
+kable(t)
+```
+
+## Kaplan-Meier Estimation
+### Overall
+```{r}
+surv_obj <- Surv(time = bhht_clean$survival_time, event = bhht_clean$event)
+
+km_fit <- survfit(surv_obj ~ 1, data = bhht_clean)
+
+plot(km_fit,
+     xlab = "Age (Years)",
+     ylab = "Survival Probability",
+     main = "Overall Survival Curve of Notable Individuals",
+     col = "black",
+     lwd = 2)
+grid()
+```
+
+### By Gender
+```{r}
+
+bhht_clean_gdr <- bhht_clean %>% filter(gender != "Other")
+surv_obj_gdr <- Surv(time = bhht_clean_gdr$survival_time, event = bhht_clean_gdr$event)
+km_fit_gender <- survfit(surv_obj_gdr ~ gender, data = bhht_clean_gdr)
+
+plot(km_fit_gender,
+     xlab = "Age (Years)",
+     ylab = "Survival Probability",
+     main = "Survival Curve by Gender",
+     col = c("blue", "red", "gray"),
+     lwd = 2)
+grid()
+legend("topright", legend = levels(bhht_clean$gender), col = c("blue", "red", "gray"), lwd = 2)
+```
+
+```{r}
+library(RColorBrewer)
+
+n_regions <- length(levels(bhht_clean$un_region))
+region_colors <- brewer.pal(max(3, n_regions), "Set1")[1:n_regions]
+
+km_fit_un_region <- survfit(surv_obj ~ un_region, data = bhht_clean)
+
+plot(km_fit_un_region,
+     xlab = "Age (Years)",
+     ylab = "Survival Probability",
+     main = "Survival Curve by UN Region",
+     col = region_colors,
+     lwd = 2)
+grid()
+legend("topright", legend = levels(bhht_clean$un_region), col = region_colors, lwd = 2)
+```
+
+```{r}
+# log rank test for var
+surv_diff_region <- survdiff(surv_obj ~ gender, data = bhht_clean)
+surv_diff_region
+```
+
+
+## Hazard Rate Estimation
+```{r}
+hazard_est <- muhaz(bhht_clean$survival_time, bhht_clean$event)
+
+plot(hazard_est,
+     xlab = "Age (Years)",
+     ylab = "Hazard Rate",
+     main = "Estimated Hazard Rate over Age",
+     col = "#000000",
+     lwd = 2)
+```
+
+## Cox Proportional Hazards Model
+```{r}
+```
